@@ -1,0 +1,83 @@
+## Clean and Load Data
+library(tidyverse)
+library(lubridate)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+
+data$Row.Labels <- mdy(as.character(data$Row.Labels))
+colnames(data)[1] <- "Date"
+
+data[2:28] <- sapply(data[names(data[2:28])],parse_number)
+
+tidy <- data %>% 
+  gather(Adspend,Value,-c(Date,prod1.customers:prod4.customers))
+tidy2 <- tidy %>%
+  gather(Prod,Customers,-c(Date,Adspend,Value))
+
+#Not sure about the 'all' and 'all.1' products; so removing them for now
+data2 <- tidy2%>%filter(!Adspend %in% c('K.all','L.all','L.all.1','L.prod.1'))
+
+#Separate Adspend into advertisers and spend
+data2 <- data2 %>% separate(Adspend, c("Advertiser","Product"),"\\.")
+
+
+
+
+## Capstone Exploratory Data Analysis 
+## Summarize The Data
+str(data2)
+summary(data2)
+data2$Date <- as.Date(data2$Date, format = "%m/%d/%y")
+
+## Use DPLYR to detail advertiser spend, customers, etc..
+advertiser_summary <- data2 %>% group_by(Advertiser) %>%
+  summarize(total_spend = sum(as.numeric(Value), na.rm = TRUE), 
+            sd_spend = sd(as.numeric(Value),na.rm = TRUE),
+            total_customers = sum(Customers,na.rm = TRUE)) %>%
+  arrange(desc(total_spend), Advertiser) %>%
+  mutate(rank = row_number())
+
+## Filter Smaller Advertisers Out
+advertiser_summary_big <- advertiser_summary %>%
+         filter(rank <= 5)
+
+advertiser_summary_big
+
+## Use GGPLOT to Create some Visualizations
+ggplot(data2, aes(x = Advertiser, y = Value)) + geom_boxplot()
+## This Plot shows that Advertiser A should be viewed separetly because it has the largest variance
+ggplot(data2, aes(x = Value, y = Customers)) + geom_point() + facet_wrap(~Advertiser,scales = "free_y")
+## This Plot shows that We need to rething how advertisers spend influence customers when you facet by them. 
+## as you can see only A and I capture any variance
+
+## Clean up data for further Analysis 
+advertiser_daily <- na.omit(data2) %>% 
+  mutate(month = month(Date), year = year(Date))
+  
+colnames(advertiser_daily)[4] <- "Spend"
+advertiser_daily<- na.omit(advertiser_daily)
+
+## Analyze all but A, D, I
+advertiser_daily %>% filter(!Advertiser %in% c("A","D","I")) %>%
+  ggplot(aes(x = Advertiser, y = Spend)) + geom_boxplot()
+
+advertiser_daily %>% filter(!Advertiser %in% c("A","D","I")) %>%
+  ggplot(aes(x = Spend, y = Customers, col = Advertiser)) + geom_point() + facet_wrap(~month, scale = "free_y")
+
+## Are there seasonal aspecst to my Data? 
+library(zoo)
+advertiser_daily %>% 
+  select(Date, Customers) %>% 
+  summarize(start_date = min(Date), end_date= max(Date))
+
+advertiser_daily_ts <- advertiser_daily %>%
+  select(Date, Customers) %>%
+  group_by(Date) %>%
+  summarize(Customers = sum(Customers))
+
+View(advertiser_daily_ts)
+
+ggplot(advertiser_daily_ts, aes(x = Date, y = Customers)) + geom_line()
+
+## There is appears to be some seosonal aspects but are they a function of spend? 
