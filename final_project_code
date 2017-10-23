@@ -1,0 +1,245 @@
+## Load Libraries
+library(tidyverse)
+library(lubridate)
+library(PerformanceAnalytics)
+library(leaps)
+library(lmtest)
+library(car)
+
+## Read in data and rename column for date
+
+data <- read.csv("capstone_tidy_data.csv",stringsAsFactors = F)
+
+data$Row.Labels <- mdy(as.character(data$Row.Labels))
+colnames(data)[1] <- "Date"
+
+data[2:28] <- sapply(data[names(data[2:28])],parse_number)
+
+## Filter only for product 1 and summarize data
+
+prod1 <- select(data,Date,A.prod1,C.prod1,D.prod1,E.prod1,F.prod1,G.prod1,H.prod1,I.prod1,J.prod1,K.prod1,L.all.1,L.prod1,prod1.customers)
+
+summary(prod1)
+View(prod1)
+
+## Remove Date column because it will not be used in the analysis
+
+prod1<- select(prod1,-Date)
+View(prod1)
+
+## Summarize spend by partner to see which to use an which to remove from the model
+
+summary(prod1)
+ad_partner_sums<- colSums(prod1,na.rm=TRUE)
+ad_partner_sums
+
+ad_partner_means<- colMeans(prod1,na.rm=TRUE)
+ad_partner_means
+
+## After looking at the total spends it looks like we can drop Parters E, J, & H
+
+prod1_clean <- select(prod1, -E.prod1, -J.prod1, -H.prod1)
+View(prod1_clean)
+
+summary(prod1_clean)
+
+## Exploring relationships via a correlation matrix and plot matrix
+
+pairs(prod1_clean, main="Correlation Matrix of Ad Partner Spend to Customer Acquisition")
+
+pairs(prod1_clean, log="xy", main="Correlation Matrix of Ad LOG Partner Spend to Customer Acquisition")
+corr_matrix <- cor(prod1_clean, method = "pearson", use = "complete.obs")
+View(corr_matrix)
+
+## Looking at these summary reports it appears as though the features that exhibit 
+## any sort linear relationship are A, I, K , L all and L prod 1 
+## Additionally L All seems to be correlated with each of the other adversers which makes sense
+## since this is general advertising for the entire company so adertising with that and other 
+## would move with each other.
+## this finding is important 
+## because one requirement for a linear model is the absence of collinearity between preditor variables
+## removing this effect will improve model performance
+
+
+## Next we need to split the data into a training and test set using a 70-30 Split
+
+smp_size<- floor(0.70 * nrow(prod1_clean))
+set.seed(2017) 
+train_ind<- sample(seq_len(nrow(prod1_clean)),size = smp_size)
+
+train <- prod1_clean[train_ind,]
+test <- prod1_clean[-train_ind,]
+
+View(train)
+View(test)
+
+## Linear Modeling and summary (all variables)
+
+mod1<- lm(prod1.customers~.,data=train)
+summary(mod1)
+
+## Looking at the output it appears as though Advertisers C and G are completely insignificant
+## Advertiser F, L all and L prod 1 are slightly significant and can possibly be removed
+
+## Remove non signifanct variables
+
+mod2<- lm(prod1.customers~ A.prod1 + D.prod1 + F.prod1 + I.prod1 + K.prod1 + L.all.1 + L.prod1,data=train)
+summary(mod2)
+
+## Adjusted R square remains the same after removing variables from Model 1, repeating this step by removing L all 1
+
+mod3<- lm(prod1.customers~ A.prod1 + D.prod1 + F.prod1 + I.prod1 + K.prod1 + L.prod1,data=train)
+summary(mod3)
+
+## Adding some interaction variables
+
+mod4<- lm(prod1.customers~ A.prod1 + D.prod1 + F.prod1 + I.prod1 + K.prod1 + L.all.1 + L.prod1 + L.all.1*A.prod1,data=train)
+summary(mod4)
+
+## Adding interaction with All and A boosed the adjusted R squared by over 10 points
+
+## Adding 2 additional interaction terms as well as dropping advertiser F which isn't significant. 
+mod5<- lm(prod1.customers ~ A.prod1 + L.all.1*A.prod1 + D.prod1 + I.prod1 + K.prod1 + L.all.1 + L.prod1 + L.prod1*L.all.1 + I.prod1*A.prod1, data=train)
+summary(mod5)
+
+## Multicollinearity is present in the data set, need to use more interactions to remove those
+## effects and improve model performance.
+
+## Test all possible combinations by using the leaps package.
+## Using regsubsets to select the 3 best models out of all possible combinations of 
+## independent variables and interactions
+
+reg_subset <- regsubsets(prod1.customers ~.^2, data =train, nbest = 3, method = "exhaustive")
+
+## Using the Cars package find best most optimal subset size using adjusted r squared, bic and Mallows CP
+subsets(reg_subset, statistic = "bic")
+
+## Adjust size of the y axis for bic, aic
+subsets(reg_subset, statistic = "bic", ylim = c(-425, -375), xlim = c(0,15))
+subsets(reg_subset, statistic = "bic", ylim = c(-425, -410), xlim = c(5,10))
+
+## Using BIC it looks like the most optimal model has 8 predictors 
+
+## Use CP method 
+subsets(reg_subset, statistic = "cp")
+subsets(reg_subset, statistic = "cp", ylim=c(0,50), xlim = c(5,10))
+
+## Using the CP statistic it appears as though the most optimal subset is around 8
+## With a CP of around 40
+
+## Use Adjusted R squared 
+subsets(reg_subset, statistic = "adjr")
+subsets(reg_subset, statistic = "adjr", ylim = c(.55,.8), xlim = c(5,10))
+
+## Using adjusted R^2 we see that 8 is the optimal subset size which has a value of around 0.68
+
+## Use subset function again to get best model for each subset. 
+reg_subset_best <- regsubsets(prod1.customers ~.^2, data =train, nbest = 1, method = "exhaustive")
+
+subsets(reg_subset_best, statistic = "bic", ylim = c(-425, -415), xlim = c(0,25))
+subsets(reg_subset_best, statistic = "cp", ylim=c(0,50), xlim = c(5,10))
+subsets(reg_subset_best, statistic = "adjr2", ylim = c(.60,.8), xlim = c(0,10))
+
+summary(reg_subset_best)
+plot(reg_subset_best, scale = "adjr2", main = "Adjusted R^2")
+coef(reg_subset_best,8)
+
+## Create model using reg_subset_best
+mod6<- lm(prod1.customers ~ A.prod1 + L.prod1 + A.prod1:D.prod1 + A.prod1:I.prod1 + A.prod1:L.all.1 + I.prod1:K.prod1 + I.prod1:L.prod1 + L.all.1:L.prod1, data = train)
+summary(mod6)
+
+
+## Model 6 using subset selection has increased the R^2 from the baseline model of 0.533 to 0.684
+
+## Plot Models
+
+plot(mod1)
+plot(mod2)
+plot(mod3)
+plot(mod6)
+
+## Test Model 6 on Test Set as well as Training Set
+
+train$prediction <- predict(mod6,train, type= "response")
+head(train)
+
+test$prediction <- predict(mod6, test, type = "response")
+head(test)
+
+## Perform other Summary Statistics (Correlation, RMSE, MAE)
+
+summary(mod6)
+
+# Training Set
+
+train_corr <- round(cor(train$prediction, train$prod1.customers),2)
+train_RMSE <- round(sqrt(mean((train$prediction - train$prod1.customers)^2)))
+train_MAE  <- round(mean(abs(train$prediction - train$prod1.customers)),2)
+
+train_stats <- c(train_corr,train_RMSE,train_MAE)
+train_stats
+
+# Test Set
+
+test_corr <- round(cor(test$prediction, test$prod1.customers),2)
+test_RMSE <- round(sqrt(mean((test$prediction - test$prod1.customers)^2)))
+test_MAE  <- round(mean(abs(test$prediction - test$prod1.customers)),2)
+
+test_stats <- c(test_corr,test_RMSE,test_MAE)
+test_stats
+
+## Fitting a Ridge Regression
+
+## Load library and scale data
+library(MASS)
+ridge_data <- scale(prod1_clean)
+ridge_data <- as.data.frame(ridge_data)
+
+lm_seq<- seq(0,1000,0.01)
+
+## Create Model & Plot
+mod_rid<- lm.ridge(prod1.customers~., data=ridge_data, lambda = lm_seq)
+
+plot(mod_rid)
+select(mod_rid)
+
+
+## Using Select our smallest value occurs when lambda is at 15.29
+plot(lm_seq, mod_rid$GCV, main="GCV of Ridge Regression", type="l", xlab=expression(lambda), ylab="GCV")
+
+## Create optimal Ridge Model using appropriate lambda value
+
+mod_rid$lambda[1530]
+coef(mod_rid)[1530,]
+
+
+
+## Use GLMNET package with appropriate lambda value
+library(glmnet)
+
+x<- prod1_clean %>% select(-prod1.customers) %>% data.matrix()
+y<- prod1_clean$prod1.customers
+
+cv_fit<- cv.glmnet(x,y, alpha = 0, lambda = lm_seq)
+plot(cv_fit)
+
+min_lambda<- cv_fit$lambda.min
+min_lambda
+
+## Using Cross Validation our optimal lambda is 7.67
+## Predict new values using CV lambda value
+fit <- cv_fit$glmnet.fit
+summary(fit)
+
+y_pred<- predict(fit, s =min_lambda, newx = x)
+
+## Compute Summary Stats on This model
+sst <- sum((y - mean(y))^2)
+sse <- sum((y_pred - y)^2)
+rsq <- 1 - sse / sst
+rsq
+
+
+## Looking at this the Rsquared for the Ridge is Significantly lower than
+## the OSL using interaction terms therefore we will use the latter model 
+## for predicting sales. More detail of the logic will be presented in the write up
