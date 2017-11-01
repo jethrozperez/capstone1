@@ -1,0 +1,292 @@
+---
+title: "Mixed Media Modeling & Customer Acquisition"
+author: "Jethro Perez"
+date: "10/31/2017"
+output:
+  word_document: default
+  pdf_document: default
+  html_document: default
+---
+
+### I. Introduction 
+
+In the world of e-commerce [CPG](http://www.investopedia.com/terms/c/cpg.asp) companies must balance year over year growth in revenue while maintaining a positive ratio of lifetime value over customer acquisition cost. The ratio is known as **LTV/CAC** and is one of the most important key performance indicators (KPI) for any company whose business model lies on customers consuming a companies goods on either a one-time or recurring basis. 
+  
+Maximizing this KPI can be divided into two problems, one centered on classifying customers based on average basket size and targeting customers who purchase the most (i.e. maximizing LTV). The other which is the focus of my project is by minimizing the average cost per acquisition (CPA). 
+
+
+### II. The Problem
+
+In the realm of marketing a [mixed media model](https://en.wikipedia.org/wiki/Marketing_mix_modeling) (MMM) is used by savvy data intensive organizations to minimize CPA's. A MMM assess the impact of each of your marketing partners in driving new customer acquisition. By building a MMM marketers can see which channels drive the highest volume of new customers and conversely which don’t. With this information executives can alter their budgets which normally rely on third party data from advertisers who have different reporting standards and measuring techniques. 
+
+Building a model that answers these questions can range from simple to complex depending on the state of your business as well as your marketing plan. For example, building a model for a local restaurant who advertises in newspapers and local ads is rather simple compared to a Fortune 500 company that sells a product in multiple countries and spends billions of dollars on advertising budgets across multiple different partners. 
+
+In the case of my company we operate across the United States and spend millions of dollars acquiring customers for multiple different products. We have a baseline set of advertisers which we spend most our yearly budget on while reserving some for testing new partners who may unlock new markets that have yet to be opened. 
+
+The marketing team has asked me to create a model that can accurately predict customer acquisition in a given period in time with a predefined budget. If I am able to correctly customer counts with a high degree of accuracy the team would like to know which partners are the most effective in acquiring new customers at the lowest cost in order to drive down CPA's. 
+
+### III. Data Wrangling
+
+The data that was gathered for this model came from our third-party advertisers as well as our internal data model which I build and maintain. Acquiring the former was an exercise in generating reports from the respective advertisers reporting platforms or via email. To have substantial sample size *n* given the number of potential predictors *p* I decided on aggregating data on a daily level going back from 2016 through 2017 for four different products. In total I gathered 578 observations and 31 different variables.
+ 
+The data here has been anonymized and scaled for privacy purposes. Figures stated in my model will be different from this project but the overall process (modeling, results and deck) will be the same when recreating it for company members. I decided to also limit this project model only **Product 1** which is our largest and most important. The findings of this can easily be reproduced to the other three products. 
+
+When gathering advertiser data I intentionally omitted customer counts which each partner collects. The reason for this is due to a phenomenon known as [over attribution](https://en.wikipedia.org/wiki/Attribution_(marketing)).  This occurs because advertisers have different methodologies when measuring the impact of their platform. For example, a social media company like Twitter can track users who click on advertisements to a subsequent website purchase. That mechanism does not work for a company that sells radio advertisements who may rely on the use of specific promotion codes to measure customer acquisition. 
+
+To make matters more complex customers use multiple devices (personal computer, work computer, mobile phone, etc..) and don’t always click on ads but use search engines to engage with the brand. Having multiple touch points results in advertisers stealing attribution from each other due to customers naturally having multiple different touch points prior to purchasing  Over attribution results in overstated customer counts compared to actual figures, therefore I needed to gather that data using our internal data model. 
+
+Once I had data from each partner I anonymized and joined all the data into a CSV document. The format was intended to have each day as an observation and each column as a different advertisers spend on a product that particular day and the number of actual customers acquired on that date.
+
+I loaded the necessary libraries and read in my document into a dataframe called **data**, I then made some small changes to the column date. 
+   
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(PerformanceAnalytics)
+
+data <- read.csv("capstone_tidy_data.csv",stringsAsFactors = F)
+data[1:16] <- sapply(data[names(data[1:16])],parse_number)
+```
+
+### IV. Exploratory Data Analysis
+
+I began exploring my dataset using some of concepts I adopted after learning to use *dplyr* and *tidyr*. This is where I ran into one of the biggest problems in my entire model. To use data in tidy format each value must have a key to pair to it. In the case of advertisers and the amount spent that requirement is met, however we don’t know how many customers were acquired from that specific advertiser on a given day we only know that in aggregate. To get a 1 for 1 matching for customers by advertiser we need to solve for over attribution. This is done by either building or adopting a multi touch attribution model which is outside the scope of this project. 
+
+The inability to have data in this format limited my ability to facet advertisers as a function of amount spent and customers in a scatterplot. But as we all know real world problems will not have complete data that is clean and ready to model. 
+
+I overcame this hurdle and began to explore this data through the lens of a time series. My logic here was a belief that CPA is a function of both the mix in media spend as well as some seasonal components. An easy example of this sales for an electronic retail company which sees huge fluctuations in customer sales as the holiday season approaches.  My findings suggested that there was no such evidence in any seasonal components but this can be a false assumption, only having 1 ½ years’ worth of data is hard to confirm this theory. 
+
+I found no such pattern and using time series modeling in conjunction with regression did not seem to be the path that I wanted to take. Therefore I removed date from the original data set and continued on the path of exploring the data.I adjusted my original CSV to only include product 1 and name the date frame **prod 1**.
+
+``` {r message=FALSE}
+prod1 <- select(data,A.prod1,C.prod1,D.prod1,E.prod1,F.prod1,G.prod1,H.prod1,I.prod1,J.prod1,K.prod1,L.all.1,L.prod1,prod1.customers)
+```
+
+I followed this by looking at some basic scatter plots which I did log transformations to make spotting trends easier. There are no categorical variables in this data set so using boxplots or histograms a bit moot. I followed by computing some basic summary statistics including the mean, variance and max/min to see how my data was distributed. Looking at this I removed partners that didn't have an adequete amount of spend during the period in which data was collected. This new data frame is called **prod1_clean**. 
+
+``` {r error=FALSE, warning=FALSE}
+summary(prod1)
+
+ad_partner_sums<- colSums(prod1,na.rm=TRUE)
+ad_partner_sums
+
+ad_partner_means<- colMeans(prod1,na.rm=TRUE)
+ad_partner_means
+
+prod1_clean <- select(prod1, -E.prod1, -J.prod1, -H.prod1)
+summary(prod1_clean)
+
+```
+
+Lastly I created a correlation matrix using the pairs and corr_matrix function to get a better idea of how each variable varied with each other. The linear relationships I saw on each of the predictors variables with the response ignited the idea for the initial algorithm that I would use to apply machine learning to solve the question at hand.
+
+``` {r echo=FALSE, warning=FALSE, fig.align="center"} 
+
+pairs(prod1_clean, log="xy", main="Correlation Matrix of Ad LOG Partner Spend to Customer Acquisition")
+
+
+```
+
+``` {r warning=FALSE} 
+
+corr_matrix <- cor(prod1_clean, method = "pearson", use = "complete.obs")
+```
+
+### IV. Model Selection
+
+Given the structure of my data set I believe multiple linear regression is the best approach and starting point. I began by building a multiple linear regression with my baseline model being one that simply uses all the predictors to measure the response.
+
+I randomly split my data into a training and test set using a 70-30 mix. When using the baseline model I simply regressed all predictor variables on the response to see what the simplest model will yield. The summary of the model yielded a paltry adjusted r-squared value of **0.533** and only 7 out of 9 predictors being statistically significant. The model had an intercept of 204 meaning that if we spent $0 on advertising we would on average acquire 204 customers. The poor r-squared value lead me to the path of refining my model.
+
+``` {r message=FALSE, warning=FALSE}
+
+smp_size<- floor(0.70 * nrow(prod1_clean))
+set.seed(2017) 
+train_ind<- sample(seq_len(nrow(prod1_clean)),size = smp_size)
+
+train <- prod1_clean[train_ind,]
+test <- prod1_clean[-train_ind,]
+
+mod1<- lm(prod1.customers~.,data=train)
+summary(mod1)
+
+```
+
+ 
+I started removing predictors with large p-values out of the model one by one and noticed that my r-squared value wasn’t moving. This indicated that I need to take a closer look at my data to look for any patterns. I noticed a bit of multicollinearity between a few predictors which violates one of the requirements necessary for OSL to work. Limiting this required adopting another method for variable selection as well as interaction terms. 
+
+``` {r message=FALSE, warning=FALSE}
+
+mod2<- lm(prod1.customers~ A.prod1 + D.prod1 + F.prod1 + I.prod1 + K.prod1 + L.all.1 + L.prod1,data=train)
+summary(mod2)
+
+mod3<- lm(prod1.customers~ A.prod1 + D.prod1 + F.prod1 + I.prod1 + K.prod1 + L.prod1,data=train)
+summary(mod3)
+
+```
+
+I introduced a few interaction terms to see if this would improve the performance of my model and to my delight they did! Adding 3 interaction terms improved my adjusted r-squared up to 0.6403 or a 20% improvement over the baseline. This makes sense intuitively because advertisers and the users who engage in them don’t live in a vacuum. Most people who convert due to advertising are exposed to it a few times to keep it on their mind and may be influenced into buying something because they see ads everywhere they look. 
+
+``` {r message=FALSE, warning=FALSE}
+
+mod4<- lm(prod1.customers~ A.prod1 + D.prod1 + F.prod1 + I.prod1 + K.prod1 + L.all.1 + L.prod1 + L.all.1*A.prod1,data=train)
+summary(mod4)
+
+mod5<- lm(prod1.customers ~ A.prod1 + L.all.1*A.prod1 + D.prod1 + I.prod1 + K.prod1 + L.all.1 + L.prod1 + L.prod1*L.all.1 + I.prod1*A.prod1, data=train)
+summary(mod5)
+
+```
+
+Given the large boost I needed to devise a way to search every possible model that can be built using each distinct combination of predictors and interaction terms. I used stepwise selection using the regsubsets command. I created the best 3 models for each combination starting at 1 predictor 28 predictors. I then looked for the most optimal model using *BIC*, *Mallows Cp* and *Adjusted R Squared* to find the optimal number of predictors to use.  
+
+``` {r eval=FALSE}
+
+library(leaps)
+library(lmtest)
+library(car)
+
+reg_subset <- regsubsets(prod1.customers ~.^2, data =train, nbest = 3, method = "exhaustive")
+
+subsets(reg_subset, statistic = "bic")
+subsets(reg_subset, statistic = "aic", ylim = c(-425, -410), xlim = c(5,10))
+
+subsets(reg_subset, statistic = "cp")
+subsets(reg_subset, statistic = "cp", ylim=c(0,50), xlim = c(5,10))
+
+subsets(reg_subset, statistic = "adjr")
+subsets(reg_subset, statistic = "adjr", ylim = c(.55,.8), xlim = c(5,10))
+
+reg_subset_best <- regsubsets(prod1.customers ~.^2, data =train, nbest = 1, method = "exhaustive")
+
+subsets(reg_subset_best, statistic = "bic", ylim = c(-425, -415), xlim = c(0,25))
+subsets(reg_subset_best, statistic = "cp", ylim=c(0,50), xlim = c(5,10))
+subsets(reg_subset_best, statistic = "adjr2", ylim = c(.60,.8), xlim = c(0,10))
+
+summary(reg_subset_best)
+plot(reg_subset_best, scale = "adjr2", main = "Adjusted R^2")
+coef(reg_subset_best,8)
+
+mod6<- lm(prod1.customers ~ A.prod1 + L.prod1 + A.prod1:D.prod1 + A.prod1:I.prod1 + A.prod1:L.all.1 + I.prod1:K.prod1 + I.prod1:L.prod1 + L.all.1:L.prod1, data = train)
+summary(mod6)
+
+```
+
+
+All three statistics showed that 8 is the optimal number of predictors which yielded the following model. 
+
+   $Customers = 186 + 0.0017A + 0.1062L - 0.000000054AxD - 0.00000001AxI + 0.000055AxL.all + 0.00000056IxK - 0.00000056IxL - 0.00074L.allxL$
+
+
+This says that the optimal mix in media occurs when you spend on advertiser A and L independently and spend on pairs of A and D together, A and I together, etc.. If you were to spend $0 you would acquire 186 customers, in real world setting this value would hold for a period of time as the effects of advertising diminish. This latency period can last periods as short as 30 days and as far as 90 days  As stated in the Introduction to Statistical Learning book there are a few advertisers that have synergy or work with each other. The result of this work boosted the adjusted r-squared to 0.684 or a 28% improvement from the baseline model. 
+
+The presence of multicollinearity made me believe that the last model may still be flawed so I decided to use a ridge regression which performs well with data like this. Ridge regression uses a penalty factor *λ* to adjust each of predictors via a shrinking the beta values based on this penalty.  I ran a sequence of over 2,000 models at various lambda values. I found the optimal value and created model. This model unfortunately performed poorly with an adjusted r-squared of 0.537. This makes sense with a basic ridge regression because it simply shrinks the beta values to a very small value but doesn’t remove them. 
+
+``` {r eval=FALSE}
+
+library(MASS)
+ridge_data <- scale(prod1_clean)
+ridge_data <- as.data.frame(ridge_data)
+
+lm_seq<- seq(0,1000,0.01)
+
+## Create Model & Plot
+mod_rid<- lm.ridge(prod1.customers~., data=ridge_data, lambda = lm_seq)
+
+plot(mod_rid)
+select(mod_rid)
+
+
+## Using Select our smallest value occurs when lambda is at 15.29
+plot(lm_seq, mod_rid$GCV, main="GCV of Ridge Regression", type="l", xlab=expression(lambda), ylab="GCV")
+
+## Create optimal Ridge Model using appropriate lambda value
+
+mod_rid$lambda[1530]
+coef(mod_rid)[1530,]
+
+
+## Use GLMNET package with appropriate lambda value
+library(glmnet)
+
+x<- prod1_clean %>% select(-prod1.customers) %>% data.matrix()
+y<- prod1_clean$prod1.customers
+
+cv_fit<- cv.glmnet(x,y, alpha = 0, lambda = lm_seq)
+plot(cv_fit)
+
+min_lambda<- cv_fit$lambda.min
+min_lambda
+
+## Using Cross Validation our optimal lambda is 7.67
+## Predict new values using CV lambda value
+fit <- cv_fit$glmnet.fit
+summary(fit)
+
+y_pred<- predict(fit, s =min_lambda, newx = x)
+
+## Compute Summary Stats on This model
+sst <- sum((y - mean(y))^2)
+sse <- sum((y_pred - y)^2)
+rsq <- 1 - sse / sst
+rsq
+
+
+
+```
+
+After generating these models, I gauged their performance via k fold cross validation for the ridge to simply using the test set those using OSL. This led to the conclusion of using the discovered using the subset selection process.
+
+``` {r eval=FALSE}
+
+plot(mod1)
+plot(mod2)
+plot(mod3)
+plot(mod6)
+
+## Test Model 6 on Test Set as well as Training Set
+
+train$prediction <- predict(mod6,train, type= "response")
+head(train)
+
+test$prediction <- predict(mod6, test, type = "response")
+head(test)
+
+## Perform other Summary Statistics (Correlation, RMSE, MAE)
+
+summary(mod6)
+
+# Training Set
+
+train_corr <- round(cor(train$prediction, train$prod1.customers),2)
+train_RMSE <- round(sqrt(mean((train$prediction - train$prod1.customers)^2)))
+train_MAE  <- round(mean(abs(train$prediction - train$prod1.customers)),2)
+
+train_stats <- c(train_corr,train_RMSE,train_MAE)
+train_stats
+
+# Test Set
+
+test_corr <- round(cor(test$prediction, test$prod1.customers),2)
+test_RMSE <- round(sqrt(mean((test$prediction - test$prod1.customers)^2)))
+test_MAE  <- round(mean(abs(test$prediction - test$prod1.customers)),2)
+
+test_stats <- c(test_corr,test_RMSE,test_MAE)
+test_stats
+
+```
+
+This led me to choose *Model 6* as the best of the ones built. It preformed the best amongst the training and test set but had room to improve. Doing so however requires going back to the data collection process.
+
+### V. Summary
+
+As I finished this project I found that there is more complexity to the problem at hand then what was first assumed. I am happy with the model I constructed but I believe with some improvements in the data I can reach one which will perform better. 
+
+This leads me to my first recommendation which is to use the presence of the synergies found in my model to better understand which advertisers interact and how many different touch points are there.  My model only assumes pairwise connections but there can be interactions with 3 or 4 distinct combinations working together. 
+
+If we build a multi-touch attribution model or purchase a service we can understand how many touch points it takes a user to convert. Having this data will give us a deeper understanding of these relationships and their magnitude. Understanding this will assist in variable selection which in turn may produce a better model. 
+
+While this is being worked on I recommend testing this model by adjusting spending allocations and spending considerably less on those that don’t appear in this model. Doing so diverts money that would have been wasted on channels that don’t produce any new customers into ones that have the best cost efficiencies. As we have seen in the output of *Model 6* there are a few partners whose interaction is resulting in negative customer acquisition!! One can hypothesize that some of the ad partners that we currently employ have massive overlap in users to their respective platforms, spending money on both could be cathing the same eyes multiple times so spending on both together actually hurts customer acquisition. One could use these findings to run a regional analysis on those platforms to see why this occuring. 
+    
+My last recommendation would be to further enhance the depth of data that is collected. One factor that was not discussed but impacted the results is the presence of customers who purchased without the influence of advertising. This model assumed that 100% of the variation of customers acquired was due to advertising. That is not the case in most organizations which can use brand recognition to influence purchase behavior. The simplest example here is coca cola which is something that almost everyone remembers but isn’t necessarily because you saw them on Facebook. There are a few current estimates of what percentage of customers are from the Non-Paid channel as it is called. If we collected this and removed it from the equation we would have better model performance. 
+
+Overall I am confident that the model presented can be used in practice and iterated on with new data as well as different modeling techniques as we learn more about the impact of advertisers on customer’s decision to purchase. All of this of course is easier with more data!
+
