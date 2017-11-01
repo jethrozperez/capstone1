@@ -6,30 +6,22 @@ library(leaps)
 library(lmtest)
 library(car)
 
-## Read in data and rename column for date
-
+## Read in data 
 data <- read.csv("capstone_tidy_data.csv",stringsAsFactors = F)
+View(data)
 
-data$Row.Labels <- mdy(as.character(data$Row.Labels))
-colnames(data)[1] <- "Date"
-
-data[2:28] <- sapply(data[names(data[2:28])],parse_number)
+data[1:16] <- sapply(data[names(data[1:16])],parse_number)
 
 ## Filter only for product 1 and summarize data
 
-prod1 <- select(data,Date,A.prod1,C.prod1,D.prod1,E.prod1,F.prod1,G.prod1,H.prod1,I.prod1,J.prod1,K.prod1,L.all.1,L.prod1,prod1.customers)
+prod1 <- select(data,A.prod1,C.prod1,D.prod1,E.prod1,F.prod1,G.prod1,H.prod1,I.prod1,J.prod1,K.prod1,L.all.1,L.prod1,prod1.customers)
 
 summary(prod1)
 View(prod1)
-
-## Remove Date column because it will not be used in the analysis
-
-prod1<- select(prod1,-Date)
-View(prod1)
+str(prod1)
 
 ## Summarize spend by partner to see which to use an which to remove from the model
 
-summary(prod1)
 ad_partner_sums<- colSums(prod1,na.rm=TRUE)
 ad_partner_sums
 
@@ -114,9 +106,9 @@ reg_subset <- regsubsets(prod1.customers ~.^2, data =train, nbest = 3, method = 
 ## Using the Cars package find best most optimal subset size using adjusted r squared, bic and Mallows CP
 subsets(reg_subset, statistic = "bic")
 
-## Adjust size of the y axis for bic, aic
+## Adjust size of the y axis for bic
 subsets(reg_subset, statistic = "bic", ylim = c(-425, -375), xlim = c(0,15))
-subsets(reg_subset, statistic = "bic", ylim = c(-425, -410), xlim = c(5,10))
+subsets(reg_subset, statistic = "aic", ylim = c(-425, -410), xlim = c(5,10))
 
 ## Using BIC it looks like the most optimal model has 8 predictors 
 
@@ -211,7 +203,6 @@ plot(lm_seq, mod_rid$GCV, main="GCV of Ridge Regression", type="l", xlab=express
 
 mod_rid$lambda[1530]
 coef(mod_rid)[1530,]
-
 
 
 ## Use GLMNET package with appropriate lambda value
